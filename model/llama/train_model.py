@@ -82,7 +82,7 @@ class LLaMaTrainModel(BaseModel):
 
 
 @registry.register_train_model(["llama1_with_hyena", "llama2_with_hyena", "llama3_with_hyena",
-                                "llama1_with_bert", "llama2_with_bert", "llama3_with_bert"])
+                                "llama1_with_bert", "llama2_with_bert", "llama3_with_bert", "llama3_with_nt"])
 class MultimodalLlamaTrainModel(LLaMaTrainModel):
     def __init__(self, model, args):
         super().__init__(model, args)
