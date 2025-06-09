@@ -8,7 +8,7 @@ from pathlib import Path
 from functools import partial
 from tiktoken.load import load_tiktoken_bpe
 from sentencepiece import SentencePieceProcessor
-from transformers import PreTrainedTokenizer, PreTrainedTokenizerFast
+from transformers import PreTrainedTokenizer, PreTrainedTokenizerFast, AutoTokenizer
 from typing import List, Dict, Optional, Tuple, Sequence, Union, Literal, AbstractSet, Collection, cast, Iterator
 
 from common.registry import registry
@@ -430,6 +430,44 @@ class DnaBert2Tokenizer:
         self.bos_id: int = self.tokenizer.bos_token_id
         self.eos_id: int = self.tokenizer.eos_token_id
         self.pad_id: int = self.tokenizer.pad_token_id
+
+        if self.pad_id is None:
+            self.pad_id = 0
+
+    def encode(self, s: str, bos: bool=False, eos: bool=False) -> List[int]:
+        assert self.is_valid_sequence(s), 'The input string is not fully composed by dna sequence'
+        t = self.tokenizer.encode(s, add_special_tokens=False)
+        if bos:
+            t = [self.bos_id] + t
+        if eos:
+            t = t + [self.eos_id]
+        return t
+
+    def decode(self, t: List[int]) -> str:
+        return self.tokenizer.decode(t)
+
+    def vocab_size(self):
+        return self.n_words
+
+    def get_piece_size(self):
+        return self.n_words
+    
+    @staticmethod
+    def is_valid_sequence(seq):
+        return set(seq.upper()) <= set('ATCG')
+
+@registry.register_tokenizer("nt")
+class NtTokenizer:
+    def __init__(self, model_path: Optional[str]):
+        with warnings.catch_warnings(), ignore_module_print():
+            warnings.simplefilter("ignore")
+            self.tokenizer = AutoTokenizer.from_pretrained(model_path)
+   
+        # BOS / EOS token IDs
+        self.bos_id: int = self.tokenizer.bos_token_id
+        self.eos_id: int = self.tokenizer.eos_token_id
+        self.pad_id: int = self.tokenizer.pad_token_id
+        self.n_words: int = self.tokenizer.vocab_size
 
         if self.pad_id is None:
             self.pad_id = 0
