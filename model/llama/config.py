@@ -23,6 +23,9 @@ class ModelArgs:
     tokenizer: Optional[str] = ''
     lora_layers: List[str] = field(default_factory=lambda: ['wk', 'wv', 'wq', 'wo', 'w1', 'w2', 'w3'])
     dtype: str = 'float16'
+    mode: str = 'pool'
+    multimodal_sample_mode: str = 'pool'
+    multimodal_k_tokens: int = 64
     def get_dtype(self) -> Optional[torch.dtype]:
         """Gets the torch dtype from the config dtype string."""
         return STR_DTYPE_TO_TORCH_DTYPE.get(self.dtype, None)
