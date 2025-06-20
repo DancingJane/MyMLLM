@@ -1670,7 +1670,14 @@ if __name__ == '__main__':
     from model.nt.config import NtConfig
     from transformers import PreTrainedTokenizerFast, AutoTokenizer
 
-    config = NtConfig(vocab_size=4107, mask_token_id=2, pad_token_id=1, emb_layer_norm_before=False)
+    # config = NtConfig(vocab_size=4107, mask_token_id=2, pad_token_id=1, emb_layer_norm_before=False)
+    config = NtConfig(
+    vocab_size=4107,
+    num_hidden_layers=27,  # 匹配预训练模型的27层
+    hidden_size=1280,      # 根据预训练模型调整
+    intermediate_size=5120 # 根据预训练模型调整
+    )
+
     model = NtModel(config=config)
     model.load_state_dict(torch.load('/tos-bjml-ai4agr/mazhe/model_dir/nucleotide-transformer/pytorch_model.bin', map_location='cpu'), strict=False)
     device = 'cpu'
