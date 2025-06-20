@@ -167,7 +167,7 @@ class Trainer:
                     if self.writer is not None:
                         self.writer.add_scalar('loss', avg_loss, self.global_step)
                         self.writer.add_scalar('lr', self.lr, self.global_step)
-                        self.writer.add_scalar('grad_norm', self.grad_norm, self.global_step)
+                        # self.writer.add_scalar('grad_norm', self.grad_norm, self.global_step)
                         self.writer.add_scalar('avg_time', avg_time, self.global_step)
                     if self.args.wandb and not self.args.test_code:
                         wandb.log({'loss': avg_loss,
