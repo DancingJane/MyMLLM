@@ -91,7 +91,7 @@ if __name__ == '__main__':
             if args.wandb:
                 os.environ['WANDB_CACHE_DIR'] = args.wandb_cache_dir
                 os.environ['WANDB_DIR'] = args.wandb_dir
-                swanlab.login(api_key='7BZRyWx1ftGxsthmlgZ1Q', save=True)
+                swanlab.login(api_key='xxx', save=True)
                 swanlab.init(
                     project=args.wandb_project,
                     experiment_name=args.experiment_name + current_time,

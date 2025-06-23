@@ -27,15 +27,10 @@ def forward_step_deepspeed(model: DeepSpeedEngine, data_loader: RepeatingLoader,
         batch = to_device(batch, args.device)
 
     with torch.profiler.record_function("forward_path"):
-        if args.huggingface:
-            loss = model(input_ids=batch['input_ids'],
-                         labels=batch['labels'],
-                         attention_mask=batch['attention_mask']).loss
-            metric = {}
-        else:
-            loss, metric = model(**batch)
+        loss, metric = model(**batch)
 
         if args.all_reduce_loss:
+            print("in this track, 🌟")
             # Reduce loss for average loss print, not for backpropagation.
             # DeepSpeed uses on-chip loss for backpropagation and all-reduces gradients afterwards.
             loss_reduced = reduce_tensor(loss, args.world_size)
@@ -44,13 +39,15 @@ def forward_step_deepspeed(model: DeepSpeedEngine, data_loader: RepeatingLoader,
             
         return loss, metric
     
+# 🌟使用的如下
 def backward_step_deepspeed(model: DeepSpeedEngine, optimizer, loss, lr_scheduler, args, step):
     with record_function("backward_path"):
-        model.backward(loss)
-        # deepspeed/runtime/engine.py ##line 2134
-        # Only update model when self.is_gradient_accumulation_boundary()
-        model.step()
-
+        try:
+            model.backward(loss)
+            model.step()
+        except RuntimeError as e:
+            print(f"[Backward ERROR] step={step}", e)
+            print(f"loss: dtype={loss.dtype}, shape={tuple(loss.shape)}, grad_fn={loss.grad_fn}")
     return model
     
 def backward_step_deepspeed_relora(model: DeepSpeedEngine, optimizer, loss, lr_scheduler, args, step):
