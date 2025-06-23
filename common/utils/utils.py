@@ -183,39 +183,75 @@ def to_device(batch, device):
             output[k] = v
     return output
 
+# class DataCollator():
+#     def __init__(self, tokenizer):
+#         self.tokenizer = tokenizer
+
+#     def __call__(self, examples):
+#         input_ids_list, labels_list, cal_metric_pos_list, dna_ids_list, before_dna_list = [], [], [], [], []
+#         attention_masks_list = []
+#         for instance in examples:
+#             input_ids = torch.LongTensor(instance["input_ids"]) if isinstance(instance["input_ids"], list) else instance["input_ids"]
+#             labels = torch.LongTensor(instance["labels"]) if isinstance(instance["labels"], list) else instance["labels"]
+#             attention_masks = torch.LongTensor(instance["attention_masks"]) if isinstance(instance["labels"], list) else instance["labels"]
+#             cal_metric_pos = instance.get("cal_metric_pos", None)
+#             dna_ids = instance.get("dna_ids", None)
+#             before_dna = instance.get("before_dna", None)
+
+#             input_ids_list.append(input_ids) 
+#             labels_list.append(labels)
+#             attention_masks_list.append(attention_masks)
+#             cal_metric_pos_list.append(cal_metric_pos)
+#             dna_ids_list.append(dna_ids)
+#             before_dna_list.append(before_dna)
+
+#         if None in cal_metric_pos_list:
+#             cal_metric_pos_list = None
+#         if None in dna_ids_list or None in before_dna_list:
+#             dna_ids_list = None
+#             before_dna_list = None
+
+#         return {"input_ids": torch.stack(input_ids_list),
+#                 "dna_ids": rnn_utils.pad_sequence(dna_ids_list, batch_first=True, padding_value=4) if dna_ids_list is not None else None,
+#                 "labels": torch.stack(labels_list),
+#                 "attention_mask": torch.stack(attention_masks_list),
+#                 "cal_metric_pos_tensor": torch.tensor(cal_metric_pos_list) if cal_metric_pos_list is not None else None,
+#                 "before_dna": torch.tensor(before_dna_list) if before_dna_list is not None else None}
+
 class DataCollator():
     def __init__(self, tokenizer):
         self.tokenizer = tokenizer
 
     def __call__(self, examples):
-        input_ids_list, labels_list, cal_metric_pos_list, dna_ids_list, before_dna_list = [], [], [], [], []
+        input_ids_list, labels_list, cal_metric_pos_list, dna_ids_lists, dna_start_pos_lists = [], [], [], [], []
         attention_masks_list = []
         for instance in examples:
             input_ids = torch.LongTensor(instance["input_ids"]) if isinstance(instance["input_ids"], list) else instance["input_ids"]
             labels = torch.LongTensor(instance["labels"]) if isinstance(instance["labels"], list) else instance["labels"]
             attention_masks = torch.LongTensor(instance["attention_masks"]) if isinstance(instance["labels"], list) else instance["labels"]
             cal_metric_pos = instance.get("cal_metric_pos", None)
-            dna_ids = instance.get("dna_ids", None)
-            before_dna= instance.get("before_dna", None)
+            dna_ids_list = instance.get("dna_ids_list", None)
+            dna_start_pos_list = instance.get("dna_start_pos_list", None)
+
             input_ids_list.append(input_ids) 
             labels_list.append(labels)
             attention_masks_list.append(attention_masks)
             cal_metric_pos_list.append(cal_metric_pos)
-            dna_ids_list.append(dna_ids)
-            before_dna_list.append(before_dna)
+            dna_ids_lists.append(dna_ids_list)
+            dna_start_pos_lists.append(dna_start_pos_list)
 
         if None in cal_metric_pos_list:
             cal_metric_pos_list = None
-        if None in dna_ids_list or None in before_dna_list:
-            dna_ids_list = None
-            before_dna_list = None
+        if None in dna_ids_lists or None in dna_start_pos_lists:
+            dna_ids_lists = None
+            dna_start_pos_lists = None
 
         return {"input_ids": torch.stack(input_ids_list),
-                "dna_ids": rnn_utils.pad_sequence(dna_ids_list, batch_first=True, padding_value=4) if dna_ids_list is not None else None,
+                "dna_ids_lists": dna_ids_lists,
                 "labels": torch.stack(labels_list),
                 "attention_mask": torch.stack(attention_masks_list),
                 "cal_metric_pos_tensor": torch.tensor(cal_metric_pos_list) if cal_metric_pos_list is not None else None,
-                "before_dna": torch.tensor(before_dna_list) if before_dna_list is not None else None}
+                "dna_start_pos_lists": dna_start_pos_lists}
 
 class PipeLine_Datacollator():
     def __init__(self, tokenizer):

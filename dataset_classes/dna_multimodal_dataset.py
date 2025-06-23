@@ -33,90 +33,122 @@ class MultimodalDNADataSet(BaseDataset):
         
     def process_sample(self, sample):
         input_ids = []
-        dna_ids = []
-        dna_ids_indicater = []
+        dna_ids_list = []         # List[List[int]]: 每一段 DNA 的 token 序列
+        dna_start_pos_list = []   # List[int]: 每段 DNA 的 pad 替换起始位置
         pos = 0
         pattern = r'[ACTG]{6,}'
         first_text_piece_tag = True
 
+        # 提取文本输入和输出
         input_text, output_text = self._extract_texts(sample)
-        self._process_text(input_text, input_ids, dna_ids, dna_ids_indicater, pos, pattern, first_text_piece_tag)
+
+        # 处理文本 + 多段 DNA 提取
+        self._process_text(input_text, input_ids, dna_ids_list, dna_start_pos_list, pos, pattern, first_text_piece_tag)
+
         if self.mode == 'sft':
             output_ids = self._encode_text(output_text)
         else:
             if output_text:
-                input_ids.append(self._encode_text(output_text))
+                input_ids += self._encode_text(output_text)
             self.train_token_count += len(input_ids)
 
         if self.mode == 'pretrain':
-            input_ids.append(self.tokenizer.eos_id)
+            input_ids.append(self.tokenizer.eos_token_id)
         else:
-            output_ids.append(self.tokenizer.eos_id)
+            output_ids.append(self.tokenizer.eos_token_id)
 
         if len(input_ids) > self.max_src_len:
-            print(f'--->Length of source data excceed at rank {self.global_rank}: required length: {len(input_ids)} while max source length: {self.max_src_len}, cuttfing off')
+            print(f'--->Length of source data excceed at rank {self.global_rank}: required length: {len(input_ids)} while max source length: {self.max_src_len}, cutting off')
             input_ids = input_ids[:self.max_src_len]
         if len(output_ids) > (self.max_len - len(input_ids)):
-            print(f'--->Length of entire data instance excceed at rank {self.global_rank}, required length: {len(output_ids) + len(input_ids)} while max source length: {self.max_len}, cuttfing off')
+            print(f'--->Length of entire data instance excceed at rank {self.global_rank}, required length: {len(output_ids) + len(input_ids)} while max source length: {self.max_len}, cutting off')
             output_ids = output_ids[:(self.max_len - len(input_ids))]
 
         input_len = len(input_ids)
         output_len = len(output_ids)
+        # 🌟sft是不是存在问题
         input_ids += output_ids
 
         if self.cal_metric_pos is not None:
-            # 1 stand for eos token 
             cal_metric_pos = input_len + 1 + self.cal_metric_pos
         elif output_len == 3:
-            cal_metric_pos = input_len + 1 
+            cal_metric_pos = input_len + 1
         else:
             cal_metric_pos = None
 
         if self.mode == 'sft':
-            labels = [self.pad_id] * input_len + output_ids
+            labels = [self.pad_token_id] * input_len + output_ids
         elif self.mode == 'pretrain':
             labels = input_ids
+
         attention_masks = [1] * len(input_ids)
+
         if self.padding:
             pad_len = self.max_len - len(input_ids)
-            input_ids += [self.pad_id] * pad_len
-            labels += [self.pad_id] * pad_len
+            input_ids += [self.pad_token_id] * pad_len
+            labels += [self.pad_token_id] * pad_len
             attention_masks += [0] * pad_len
 
         assert len(input_ids) == len(labels) == len(attention_masks)
         assert len(input_ids) <= self.max_len
-        return {"input_ids": torch.LongTensor(input_ids), 
-                "dna_ids": torch.LongTensor(dna_ids),
-                "labels": torch.LongTensor(labels),
-                "attention_masks": torch.LongTensor(attention_masks),
-                "before_dna": dna_ids_indicater,
-                "cal_metric_pos": cal_metric_pos}
 
-    def _process_text(self, input_text, input_ids, dna_ids, dna_ids_indicater, pos, pattern, first_text_piece_tag):
-        # Currently, only one DNA sequence is supported, or will cause error.
+        return {
+            "input_ids": torch.LongTensor(input_ids),
+            "dna_ids_list": [torch.LongTensor(dna_ids) for dna_ids in dna_ids_list],
+            "dna_start_pos_list": torch.LongTensor(dna_start_pos_list),
+            "labels": torch.LongTensor(labels),
+            "attention_masks": torch.LongTensor(attention_masks),
+            "cal_metric_pos": cal_metric_pos,
+        }
+
+    def _process_text(self, input_text, input_ids, dna_ids_list, dna_pos_list, pos, pattern, first_text_piece_tag):
+        # 支持多个 DNA 序列
         for match in re.finditer(pattern, input_text):
             start, end = match.span()
+            dna_seq = input_text[start:end]
+
+            # 文本前缀部分
             if pos < start:
                 if first_text_piece_tag:
-                    word_ids = [self.tokenizer.bos_id] if self.tokenizer.bos_id else []
+                    word_ids = [self.tokenizer.bos_token_id] if self.tokenizer.bos_token_id else []
                     word_ids += self.meta_prompt + self.prefix + self._encode_text(input_text[pos:start])
                     first_text_piece_tag = False
                 else:
-                    word_ids = self._encode_text(input_text[pos:start]) 
+                    word_ids = self._encode_text(input_text[pos:start])
                 input_ids += word_ids
 
-            dna_ids += self.dna_tokenizer.encode(input_text[start:end])
-            
-            word_ids = [self.tokenizer.pad_id] * self.project_token_num
+            # 添加当前 DNA 序列
+            dna_seq = input_text[start:end]
+            encoded_dna = self.dna_tokenizer(dna_seq)["input_ids"]
+
+            # 定长处理：截断 or 补 pad 到 project_token_num 长度
+            if len(encoded_dna) >= self.project_token_num:
+                encoded_dna = encoded_dna[:self.project_token_num]
+            else:
+                pad_len = self.project_token_num - len(encoded_dna)
+                encoded_dna += [self.dna_tokenizer.pad_token_id] * pad_len
+            dna_ids_list.append(encoded_dna)
+
+            # 记录该 DNA 占位起始位置
+            dna_pos_list.append(len(input_ids))
+
+            # 用 pad_token 占位（等长度或固定长度，如 self.project_token_num）
+            input_ids += [self.tokenizer.pad_token_id] * self.project_token_num  # 或者固定 project_token_num
+
             pos = end
-            if dna_ids_indicater == []:
-                dna_ids_indicater.append(len(input_ids))
+
+        # 处理 DNA 序列后剩余的文字
+        if pos < len(input_text):
+            if first_text_piece_tag:
+                word_ids = [self.tokenizer.bos_token_id] if self.tokenizer.bos_token_id else []
+                word_ids += self.meta_prompt + self.prefix + self._encode_text(input_text[pos:])
+            else:
+                word_ids = self._encode_text(input_text[pos:])
             input_ids += word_ids
 
-            if pos < len(input_text):
-                word_ids = self.tokenizer.encode(input_text[pos:len(input_text)], bos=False, eos=True)
-                input_ids += word_ids
+        # # 添加 postfix（如必要）
         input_ids += self.postfix
+
 
 @registry.register_dataset('iterable_multimodal_dna_dataset')
 class IterableMultimodalDNADataSet(MultimodalDNADataSet, BaseIterableDataset):
