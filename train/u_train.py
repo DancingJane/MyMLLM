@@ -43,7 +43,7 @@ dp_rank parameter controls who share same data sample.
 dp_rank = parallel_states.get_data_parallel_rank()
 num_dp_rank = parallel_states.get_data_parallel_world_size()
 train_dataloader = load_dataloder(args, tokenizer, dp_rank, num_dp_rank, return_dataset_kwargs, True)
-eval_dataloader = None if args.skip_eval else load_dataloder(args, tokenizer, dp_rank, num_dp_rank, return_dataset_kwargs, False)
+eval_dataloader = load_dataloder(args, tokenizer, dp_rank, num_dp_rank, return_dataset_kwargs, False)
 
 ds_config = read_config(args.ds_config_path, encoding=None)
 ds_config = refresh_config(ds_config, args)
@@ -51,11 +51,11 @@ ds_config = refresh_config(ds_config, args)
 # start tranning
 
 # Run this befor set up trainable parameters.
-prepare_lora(model, train_dataloader, args)
+# prepare_lora(model, train_dataloader, args)
 # set up trainable before acquiring optimizer.
 set_up_trainable_param(model, args)
 
-optimizer_sd, lr_scheduler_sd = getattr(model_config, 'optmizer_sd',None), getattr(model_config, 'lr_scheduler_sd',None)
+optimizer_sd, lr_scheduler_sd = getattr(model_config, 'optmizer_sd', None), getattr(model_config, 'lr_scheduler_sd', None)
 optimizer, lr_scheduler = get_optimizer(ds_config=ds_config, 
                                         args=args, 
                                         model=model, 
@@ -72,7 +72,7 @@ engine, optimizer, lr_scheduler = init_distributed_model(args,
 
 if __name__ == '__main__':
 
-    import wandb
+    import swanlab
     import logging
     import traceback
     import torch.profiler as profiler
@@ -82,18 +82,21 @@ if __name__ == '__main__':
     from train.dp_train import *
     from train.trainer import Trainer
 
+    import wandb
+
     def get_writer(args):
         current_time = datetime.now().strftime('%y-%m-%d_%H-%M')
         if not args.test_code and args.global_rank == 0:
+            # 🌟修改为SwanLab
             if args.wandb:
                 os.environ['WANDB_CACHE_DIR'] = args.wandb_cache_dir
                 os.environ['WANDB_DIR'] = args.wandb_dir
-                if args.wandb_api_key:
-                    os.environ['WANDB_API_KEY'] = args.wandb_api_key
-                wandb.init(project=args.wandb_project,
-                        entity=args.wandb_team,
-                        name=args.experiment_name + current_time,
-                        config=args)
+                swanlab.login(api_key='7BZRyWx1ftGxsthmlgZ1Q', save=True)
+                swanlab.init(
+                    project=args.wandb_project,
+                    experiment_name=args.experiment_name + current_time,
+                    config=args
+                )
             elif args.tensorboard:
                 try:
                     from torch.utils.tensorboard import SummaryWriter

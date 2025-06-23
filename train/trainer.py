@@ -14,6 +14,8 @@ from dataset_classes import RepeatingLoader
 from common.utils import parallel_states as parallel_states
 from common.utils import Timer, print_rank_0, ensure_directory_exists
 
+import swanlab
+
 class Trainer:
     def __init__(self, args, writer=None):
         self.args = args
@@ -81,14 +83,18 @@ class Trainer:
                 loss, metric = forward_step(model, train_data_loader, self.args, step)
                 self.lr = lr_scheduler.get_lr()
                 self.grad_norm = model.get_global_grad_norm()
-                if loss.isnan() or loss.isinf():
-                    print(f'Skipping backward and optimizer step for nan or inf in forwarding loss at rank {self.args.global_rank}!')
-                    # Backward process is still needed for other ranks may have normal loss.
-                    loss = 0.0
+                if torch.isnan(loss) or torch.isinf(loss):
+                    print("NaN/Inf loss, skipping but maintain graph for other ranks")
+                    # loss.new_zeros() 会创建一个和 loss 同 device、dtype 的 0-dim Tensor
+                    loss = loss.new_zeros(())
                     self.all_loss += 0.0
                     self.all_metric.append({})
                 else:
-                    self.all_loss += metric.get('loss_reduced', loss).item()
+                    val = loss
+                    if val.dim() > 0:
+                        val = val.mean()
+                    self.all_loss += val.item()
+                    # 是否需去除
                     self.all_metric.append(metric)
 
                 # Backward step
@@ -97,6 +103,9 @@ class Trainer:
                 
                 if profiler:
                     profiler.step()
+
+                # 也许需要添加 🌟
+                # torch.cuda.empty_cache()
 
                 # Evaluation
                 if step % self.args.eval_interval == 0 and eval_step is not None and not self.args.skip_eval:
@@ -164,13 +173,15 @@ class Trainer:
                                 f"lr={self.lr:.4e}, "
                                 f"avg_time={avg_time:.2f}s, remaining_time={remaining_time}, "
                                 f"remaining_steps={self.args.num_global_update_steps - self.global_step}")
+                    # 🌟防止梯度爆炸
                     if self.writer is not None:
                         self.writer.add_scalar('loss', avg_loss, self.global_step)
                         self.writer.add_scalar('lr', self.lr, self.global_step)
-                        self.writer.add_scalar('grad_norm', self.grad_norm, self.global_step)
+                        if self.grad_norm is not None:
+                            self.writer.add_scalar('grad_norm', self.grad_norm, self.global_step)
                         self.writer.add_scalar('avg_time', avg_time, self.global_step)
                     if self.args.wandb and not self.args.test_code:
-                        wandb.log({'loss': avg_loss,
+                        swanlab.log({'loss': avg_loss,
                                    'grad_norm': self.grad_norm,
                                    'lr': self.lr,
                                    'avg_time': avg_time}, 
@@ -193,7 +204,7 @@ class Trainer:
                     if self.writer is not None:
                         self.writer.add_scalar('eval_loss', self.eval_loss, self.global_step)
                     if self.args.wandb  and not self.args.test_code:
-                        wandb.log({'eval_loss': self.eval_loss}, self.global_step)
+                        swanlab.log({'eval_loss': self.eval_loss}, self.global_step)
                 self.eval_loss = 0.0
                 self.eval_metric = []
 
