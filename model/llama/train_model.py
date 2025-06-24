@@ -96,63 +96,61 @@ class MultimodalLlamaTrainModel(LLaMaTrainModel):
         # self.multimodal_projector.weight.register_hook(hook)
 
     def forward(self, **kwargs):
-        """
-        Performs the forward pass of MultimodalLlamaTrainModel during training.
-
-        model_config:
-            input_ids (torch.Tensor): Shape [batch_size, seq_len]. DNA part is padded with pad_id.
-            labels (torch.Tensor): Shape [batch_size, seq_len].
-            dna_ids (torch.Tensor): Shape [batch_size, hyena_l_output].
-            dna_ids_indicaters (torch.Tensor): Shape [batch_size, dna_sequence_count]. Currently, dna_sequence_count is restricted to 1.
-
-        Returns:
-            tuple: (loss, empty_dict)
-
-        Forward process:
-        1. Compute hidden states from input_ids: [batch_size, seq_len, hidden_size]
-        2. Process dna_ids through hyena model: [batch_size, hyena_l_output, hyena_hidden_size]
-        3. Project hyena output to word embedding space: [batch_size, hyena_l_output, hidden_size]
-        4. Replace DNA part in hidden states with projected result according the indicaters, the mask operation equals to:
-            `start_positions = dna_ids_indicaters
-            end_positions = start_positions + dna_token_num
-            for i in range(batch_size):
-                hidden_states[i, start_positions[i]:end_positions[i]] = dna_hidden_states[i]`
-        5. Pass modified hidden states through Llama model
-        6. Compute and return loss
-        """
-
-        input_ids = kwargs["input_ids"]
-        dna_ids = kwargs["dna_ids"]
-        labels = kwargs["labels"]
-        before_dna = kwargs["before_dna"]
-
-        hidden_states = self.tok_embeddings(input_ids)
+        input_ids = kwargs["input_ids"]          # [batch_size, seq_len]
+        dna_ids = kwargs["dna_ids"]             # [batch_size, 2, max_dna_len] 
+        labels = kwargs["labels"]               # [batch_size, seq_len]
+        before_dna = kwargs["before_dna"]       # [batch_size, 2] (第二个位置无效时为-1)
+        
+        # 1. 文本嵌入
+        hidden_states = self.tok_embeddings(input_ids)  # [batch_size, seq_len, hidden_dim]
+        batch_size, seq_len, hidden_dim = hidden_states.shape
+        
+        # 2. 处理DNA序列（两个片段）
         if self.encode_fp32:
             self.multimodal_model.to(torch.float32)
-        dna_hidden_states = self.encoder_forward(dna_ids, hidden_states.dtype)
-        # dna_hidden_states.register_hook(save_grad('dna'))
+        
+        # 处理每个DNA片段 (维度重组为 [batch_size*2, max_dna_len])
+        dna_ids_flat = dna_ids.view(-1, dna_ids.size(-1))  # [batch_size*2, max_dna_len]
+        dna_hidden_flat = self.encoder_forward(dna_ids_flat, hidden_states.dtype)  # [batch_size*2, max_dna_len, hidden_dim]
+        dna_hidden_states = dna_hidden_flat.view(batch_size, 2, -1, hidden_dim)    # [batch_size, 2, dna_len, hidden_dim]
+        
         if self.encode_fp32:
-            dna_hidden_states.to(input_ids.dtype)
-
-        dna_token_num = dna_hidden_states.shape[1]
-        start_positions = before_dna
-        end_positions = start_positions + dna_token_num
-
-        batch_size, seq_len, hidden_dim = hidden_states.shape
-
-        # [batch_size, seq_len]
-        index = torch.arange(seq_len).unsqueeze(0).expand(batch_size, -1).to(before_dna.device)
-        mask = (index >= start_positions) & (index < end_positions)
-        mask = mask.unsqueeze(-1).expand(-1, -1, hidden_dim)
-
-        # Scatter dna_hidden_states into hidden_states
-        hidden_states = hidden_states.masked_scatter(mask, dna_hidden_states)
-
+            dna_hidden_states = dna_hidden_states.to(input_ids.dtype)
+        
+        # 3. 逐个处理DNA片段
+        for dna_idx in range(2):
+            # 获取当前片段的起始位置（无效片段跳过）
+            curr_before_dna = before_dna[:, dna_idx]  # [batch_size,]
+            valid_mask = (curr_before_dna >= 0)       # 标记有效片段
+            
+            if not valid_mask.any():
+                continue  # 所有样本的该片段都无效
+                
+            # 处理有效样本的当前DNA片段
+            curr_dna_hidden = dna_hidden_states[valid_mask, dna_idx]  # [valid_count, dna_len, hidden_dim]
+            curr_dna_len = curr_dna_hidden.shape[1]
+            
+            # 计算替换位置
+            start_pos = curr_before_dna[valid_mask]   # [valid_count,]
+            end_pos = start_pos + curr_dna_len
+            
+            # 创建掩码（仅对有效样本）
+            valid_hidden = hidden_states[valid_mask]  # [valid_count, seq_len, hidden_dim]
+            index = torch.arange(seq_len, device=valid_hidden.device).expand(valid_hidden.size(0), -1)  # [valid_count, seq_len]
+            
+            mask = (index >= start_pos.unsqueeze(1)) & (index < end_pos.unsqueeze(1))
+            mask = mask.unsqueeze(-1).expand(-1, -1, hidden_dim)  # [valid_count, seq_len, hidden_dim]
+            
+            # 执行替换
+            valid_hidden = valid_hidden.masked_scatter(
+                mask, 
+                curr_dna_hidden.reshape(-1, curr_dna_len * hidden_dim)
+            )
+            hidden_states[valid_mask] = valid_hidden
+    
+        # 4. 后续处理
         hidden_states, labels, freqs_cis = self.cut_sequence(hidden_states, labels)
-        if self.attention_mask is not None:
-            attention_mask = self.attention_mask.to(hidden_states.device, dtype=hidden_states.dtype)
-        else:
-            attention_mask = None
+        attention_mask = self.attention_mask.to(hidden_states.device) if self.attention_mask else None
         loss, _ = self.model_forward(hidden_states, labels, freqs_cis, attention_mask)
         
         return loss, {}
