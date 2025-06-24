@@ -203,7 +203,10 @@ class QFormer(nn.Module):
 def get_multimodal_projector(model_config):
     multimodal_model_config = model_config.multimodal_model_config
     project_from = multimodal_model_config.dim # for llama3_with_dnabert
-    project_from = multimodal_model_config.hidden_size # for llama3_with_Nt
+    try:
+        project_from = multimodal_model_config.hidden_size # for llama3_with_Nt
+    except Exception as e:
+        print(e)
     project_to = model_config.dim
 
     projector_type = getattr(model_config, 'multimodal_projector_type', 'linear')
