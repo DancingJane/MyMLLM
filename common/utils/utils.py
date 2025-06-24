@@ -188,34 +188,110 @@ class DataCollator():
         self.tokenizer = tokenizer
 
     def __call__(self, examples):
-        input_ids_list, labels_list, cal_metric_pos_list, dna_ids_list, before_dna_list = [], [], [], [], []
+        input_ids_list, labels_list, cal_metric_pos_list, dna_ids_list_list, before_dna_list_list = [], [], [], [], []
         attention_masks_list = []
         for instance in examples:
             input_ids = torch.LongTensor(instance["input_ids"]) if isinstance(instance["input_ids"], list) else instance["input_ids"]
             labels = torch.LongTensor(instance["labels"]) if isinstance(instance["labels"], list) else instance["labels"]
             attention_masks = torch.LongTensor(instance["attention_masks"]) if isinstance(instance["labels"], list) else instance["labels"]
+
             cal_metric_pos = instance.get("cal_metric_pos", None)
-            dna_ids = instance.get("dna_ids", None)
-            before_dna= instance.get("before_dna", None)
+            dna_ids_list = instance.get("dna_ids_list", None)
+            before_dna_list= instance.get("before_dna_list", None)
             input_ids_list.append(input_ids) 
             labels_list.append(labels)
             attention_masks_list.append(attention_masks)
             cal_metric_pos_list.append(cal_metric_pos)
-            dna_ids_list.append(dna_ids)
-            before_dna_list.append(before_dna)
+            dna_ids_list_list.append(dna_ids_list)
+            before_dna_list_list.append(before_dna_list)
 
         if None in cal_metric_pos_list:
             cal_metric_pos_list = None
-        if None in dna_ids_list or None in before_dna_list:
-            dna_ids_list = None
-            before_dna_list = None
+        if None in dna_ids_list_list or None in before_dna_list_list:
+            dna_ids_list_list = None
+            before_dna_list_list = None
+        
+        # 假设dna_ids_list_list包含多个样本，每个样本有多个DNA序列
+        batch_padded = [
+            rnn_utils.pad_sequence(sample_sequences, batch_first=True, padding_value=4)
+            for sample_sequences in dna_ids_list_list
+        ]
+        # 如果需要进一步批次填充（变为三维张量）
+        max_seq_len = max(p.shape[1] for p in batch_padded)
+        final_padded = torch.stack([
+            torch.nn.functional.pad(p, (0, max_seq_len - p.shape[1]), value=4) 
+            for p in batch_padded
+        ])
+        # 最终形状: [num_samples, num_sequences_per_sample, max_len]
 
+        # return {"input_ids": torch.stack(input_ids_list),
+        #         "dna_ids": rnn_utils.pad_sequence(dna_ids_list_list, batch_first=True, padding_value=4) if dna_ids_list_list is not None else None,
+        #         "labels": torch.stack(labels_list),
+        #         "attention_mask": torch.stack(attention_masks_list),
+        #         "cal_metric_pos_tensor": torch.tensor(cal_metric_pos_list) if cal_metric_pos_list is not None else None,
+        #         "before_dna": torch.tensor(before_dna_list_list) if before_dna_list_list is not None else None}
         return {"input_ids": torch.stack(input_ids_list),
-                "dna_ids": rnn_utils.pad_sequence(dna_ids_list, batch_first=True, padding_value=4) if dna_ids_list is not None else None,
+                "dna_ids": final_padded if dna_ids_list_list is not None else None,
                 "labels": torch.stack(labels_list),
                 "attention_mask": torch.stack(attention_masks_list),
                 "cal_metric_pos_tensor": torch.tensor(cal_metric_pos_list) if cal_metric_pos_list is not None else None,
-                "before_dna": torch.tensor(before_dna_list) if before_dna_list is not None else None}
+                "before_dna": torch.tensor(before_dna_list_list) if before_dna_list_list is not None else None}
+
+# class DataCollator():
+#     def __init__(self, tokenizer):
+#         self.tokenizer = tokenizer
+
+#     def __call__(self, examples):
+#         input_ids_list, labels_list = [], []
+#         attention_masks_list, dna_ids_tensor_list = [], []
+#         cal_metric_pos_list, before_dna_list = [], []
+
+#         for instance in examples:
+#             # 处理必须字段（确保转为Tensor）
+#             input_ids = torch.LongTensor(instance["input_ids"]) if isinstance(instance["input_ids"], list) else instance["input_ids"]
+#             labels = torch.LongTensor(instance["labels"]) if isinstance(instance["labels"], list) else instance["labels"]
+#             attention_masks = torch.LongTensor(instance["attention_masks"]) if isinstance(instance["attention_masks"], list) else instance["attention_masks"]
+            
+#             # 处理DNA相关字段（关键修改点）
+#             dna_ids = instance.get("dna_ids_list", [])
+#             if isinstance(dna_ids, list) and len(dna_ids) > 0:
+#                 dna_ids = [torch.LongTensor(dna_ids_ele) for dna_ids_ele in dna_ids]  # 强制转换为Tensor
+#                 dna_ids_tensor_list.append(dna_ids)
+#                 before_dna_list.append(instance.get("before_dna_list", -1))  # 假设是标量值
+            
+#             input_ids_list.append(input_ids)
+#             labels_list.append(labels)
+#             attention_masks_list.append(attention_masks)
+#             cal_metric_pos_list.append(instance.get("cal_metric_pos", None))
+
+        # # 动态填充变长序列
+        # padded_input_ids = torch.nn.utils.rnn.pad_sequence(
+        #     input_ids_list, batch_first=True, padding_value=self.tokenizer.pad_token_id
+        # )
+        # padded_labels = torch.nn.utils.rnn.pad_sequence(
+        #     labels_list, batch_first=True, padding_value=self.tokenizer.pad_token_id
+        # )
+        # padded_attention = torch.nn.utils.rnn.pad_sequence(
+        #     attention_masks_list, batch_first=True, padding_value=0
+        # )
+
+        # 处理DNA字段（仅在存在时填充）
+        # dna_padded = None
+        # if len(dna_ids_tensor_list) > 0:
+        #     dna_padded = torch.nn.utils.rnn.pad_sequence(
+        #         dna_ids_tensor_list,  # 这里确保是Tensor列表
+        #         batch_first=True,
+        #         padding_value=4  # 根据DNA tokenizer的pad_id设置
+        #     )
+        
+        # return {
+        #     "input_ids": input_ids_list,
+        #     "labels": labels_list,
+        #     "attention_mask": attention_masks_list,
+        #     "dna_ids": dna_padded,
+        #     "cal_metric_pos": torch.tensor(cal_metric_pos_list) if any(x is not None for x in cal_metric_pos_list) else None,
+        #     "before_dna": torch.LongTensor(before_dna_list) if len(before_dna_list) > 0 else None
+        # }
 
 class PipeLine_Datacollator():
     def __init__(self, tokenizer):
@@ -273,11 +349,25 @@ def init_distributed_model(args, model, optimizer, lr_scheduler, ds_config, para
     Set up distributed training enviroment.
     """
     if args.disable_zero_optimizer:
+        # 检查模型参数
+        total_params = sum(p.numel() for p in model.parameters())
+        trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        print(f"Total params: {total_params}, Trainable params: {trainable_params}")
+
+        if trainable_params == 0:
+            raise ValueError("No trainable parameters found! Check model architecture or freezing logic.")
         engine, _, _, _ = deepspeed.initialize(model=model, 
                                                 config=ds_config, 
                                                 model_parameters=[p for p in model.parameters() if p.requires_grad],
                                                 mpu=None if args.num_pp_stages else parallel_states)
     else:
+        # 检查模型参数
+        total_params = sum(p.numel() for p in model.parameters())
+        trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        print(f"Total params: {total_params}, Trainable params: {trainable_params}")
+
+        if trainable_params == 0:
+            raise ValueError("No trainable parameters found! Check model architecture or freezing logic.")
         engine, optimizer, _, lr_scheduler = deepspeed.initialize(model=model, 
                                                 optimizer=optimizer, 
                                                 lr_scheduler=lr_scheduler,
