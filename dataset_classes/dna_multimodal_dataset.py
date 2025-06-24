@@ -33,14 +33,14 @@ class MultimodalDNADataSet(BaseDataset):
         
     def process_sample(self, sample):
         input_ids = []
-        dna_ids = []
-        dna_ids_indicater = []
+        dna_ids_list = []
+        dna_ids_indicater_list = []
         pos = 0
         pattern = r'[ACTG]{6,}'
         first_text_piece_tag = True
 
         input_text, output_text = self._extract_texts(sample)
-        self._process_text(input_text, input_ids, dna_ids, dna_ids_indicater, pos, pattern, first_text_piece_tag)
+        self._process_text(input_text, input_ids, dna_ids_list, dna_ids_indicater_list, pos, pattern, first_text_piece_tag)
         if self.mode == 'sft':
             output_ids = self._encode_text(output_text)
         else:
@@ -86,13 +86,13 @@ class MultimodalDNADataSet(BaseDataset):
         assert len(input_ids) == len(labels) == len(attention_masks)
         assert len(input_ids) <= self.max_len
         return {"input_ids": torch.LongTensor(input_ids), 
-                "dna_ids": torch.LongTensor(dna_ids),
+                "dna_ids_list": [torch.LongTensor(dna_ids) for dna_ids in dna_ids_list],
                 "labels": torch.LongTensor(labels),
                 "attention_masks": torch.LongTensor(attention_masks),
-                "before_dna": dna_ids_indicater,
+                "before_dna_list": dna_ids_indicater_list,
                 "cal_metric_pos": cal_metric_pos}
 
-    def _process_text(self, input_text, input_ids, dna_ids, dna_ids_indicater, pos, pattern, first_text_piece_tag):
+    def _process_text(self, input_text, input_ids, dna_ids_list, dna_ids_indicater_list, pos, pattern, first_text_piece_tag):
         # Currently, only one DNA sequence is supported, or will cause error.
         for match in re.finditer(pattern, input_text):
             start, end = match.span()
@@ -105,15 +105,20 @@ class MultimodalDNADataSet(BaseDataset):
                     word_ids = self._encode_text(input_text[pos:start]) 
                 input_ids += word_ids
 
-            dna_ids += self.dna_tokenizer.encode(input_text[start:end])
+            dna_ids_list.append(self.dna_tokenizer.encode(input_text[start:end]))
             
             word_ids = [self.tokenizer.pad_id] * self.project_token_num
             pos = end
-            if dna_ids_indicater == []:
-                dna_ids_indicater.append(len(input_ids))
+            dna_ids_indicater_list.append(len(input_ids))
             input_ids += word_ids
 
-            if pos < len(input_text):
+            is_last_match = True
+            # 检查后面是否还有匹配
+            remaining_text = input_text[end:]
+            if re.search(pattern, remaining_text):
+                is_last_match = False
+
+            if pos < len(input_text) and is_last_match: #and if its the last DNA piece
                 word_ids = self.tokenizer.encode(input_text[pos:len(input_text)], bos=False, eos=True)
                 input_ids += word_ids
         input_ids += self.postfix
