@@ -93,7 +93,7 @@ class MultimodalDNADataSet(BaseDataset):
                 "cal_metric_pos": cal_metric_pos}
 
     def _process_text(self, input_text, input_ids, dna_ids_list, dna_ids_indicater_list, pos, pattern, first_text_piece_tag):
-        # Currently, only one DNA sequence is supported, or will cause error.
+        # Currently, two DNA sequences are supported.
         for match in re.finditer(pattern, input_text):
             start, end = match.span()
             if pos < start:
