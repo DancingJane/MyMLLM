@@ -60,6 +60,9 @@ def set_up_trainable_param(model, args):
         if `args.enable_list is None` and `args.diable_list == ['tok_embeddings']` then tok_embeddings
         will be disabled and other weights are trainable
     """
+    print("All parameter names in common/utils/params_manager.py:")
+    for name, param in model.named_parameters():
+        print(f"{name}: requires_grad={param.requires_grad}")
     if args.enable_list is not None:
         if args.disable_list is not None:
             print_rank_0('--->`args.disable_list` will be ignored as `args.enable_list` is not None.',
